@@ -29,9 +29,11 @@ interface RequestOptions {
   signal?: AbortSignal;
 }
 
-// Vazio = mesma origem (o proxy do Vite encaminha /api para o FastAPI).
-// Em produção, defina VITE_API_BASE_URL (ex.: https://api.exemplo.com).
-const API_BASE_URL = `${import.meta.env.VITE_API_BASE_URL ?? ""}/api`;
+// URL base da API no Render (ou definida via VITE_API_BASE_URL)
+const rawBaseUrl = (
+  import.meta.env.VITE_API_BASE_URL ?? "https://hdf5-para-hal-back.onrender.com"
+).replace(/\/+$/, "");
+const API_BASE_URL = `${rawBaseUrl}/api`;
 
 export class AbortedError extends Error {
   constructor() {
@@ -85,7 +87,7 @@ function postForm<T>(path: string, form: FormData, opts: RequestOptions = {}): P
       }
     };
     xhr.onerror = () =>
-      reject(new Error("Falha de conexão com o servidor Python. Verifique se o backend está rodando na porta 8000."));
+      reject(new Error("Falha de conexão com o servidor da API. Verifique sua conexão e se o backend está ativo."));
     xhr.onabort = () => reject(new AbortedError());
 
     if (opts.signal) {
