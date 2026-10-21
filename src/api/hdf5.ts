@@ -29,11 +29,9 @@ interface RequestOptions {
   signal?: AbortSignal;
 }
 
-// URL base da API no Render (ou definida via VITE_API_BASE_URL)
-const rawBaseUrl = (
-  import.meta.env.VITE_API_BASE_URL ?? "https://hdf5-para-hal-back.onrender.com"
-).replace(/\/+$/, "");
-const API_BASE_URL = `${rawBaseUrl}/api`;
+// URL base da API: vazio usa o proxy do Vite para http://localhost:8000
+const rawBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/+$/, "");
+const API_BASE_URL = rawBaseUrl ? `${rawBaseUrl}/api` : "/api";
 
 export class AbortedError extends Error {
   constructor() {
@@ -87,7 +85,7 @@ function postForm<T>(path: string, form: FormData, opts: RequestOptions = {}): P
       }
     };
     xhr.onerror = () =>
-      reject(new Error("Falha de conexão com o servidor da API. Verifique sua conexão e se o backend está ativo."));
+      reject(new Error("Falha de conexão com o servidor Python. Verifique se o backend local está rodando em http://localhost:8000."));
     xhr.onabort = () => reject(new AbortedError());
 
     if (opts.signal) {
