@@ -7,7 +7,9 @@ export interface Hdf5Node {
   shape?: number[];
   dtype?: string;
   size?: number;
+  byte_size?: number;
   attrs?: number;
+  is_numeric?: boolean;
 }
 
 export interface InspectResponse {
@@ -23,13 +25,18 @@ export interface Progress {
   percent: number | null;
 }
 
+export interface ConvertResult {
+  blob: Blob;
+  filename: string;
+}
+
 interface RequestOptions {
   responseType?: "json" | "blob";
   onProgress?: (p: Progress) => void;
   signal?: AbortSignal;
 }
 
-// URL base da API: vazio usa o proxy do Vite para http://localhost:8000
+// URL base da API: vazio usa o proxy do Vite para http://127.0.0.1:8000
 const rawBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/+$/, "");
 const API_BASE_URL = rawBaseUrl ? `${rawBaseUrl}/api` : "/api";
 
@@ -40,7 +47,16 @@ export class AbortedError extends Error {
   }
 }
 
+function parseFilenameFromHeader(header: string | null, fallback: string): string {
+  if (!header) return fallback;
+  const match = header.match(/filename\*?=['"]?(?:UTF-\d['"]*)?([^;\r\n"']*)['"]?/i);
+  return match?.[1] ? decodeURIComponent(match[1]) : fallback;
+}
+
 async function extractErrorMessage(xhr: XMLHttpRequest): Promise<string> {
+  if (xhr.status === 408) {
+    return "Tempo limite esgotado (Erro 408). O servidor demorou para responder ao envio do arquivo. Verifique se o backend local está ativo em http://127.0.0.1:8000 (ou aguarde se a API remota estiver iniciando).";
+  }
   const fallback = `Erro ${xhr.status} no servidor.`;
   try {
     const raw: unknown = xhr.response;
@@ -55,8 +71,13 @@ async function extractErrorMessage(xhr: XMLHttpRequest): Promise<string> {
   }
 }
 
-function postForm<T>(path: string, form: FormData, opts: RequestOptions = {}): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
+interface PostResult<T> {
+  data: T;
+  filename?: string;
+}
+
+function postForm<T>(path: string, form: FormData, opts: RequestOptions = {}): Promise<PostResult<T>> {
+  return new Promise<PostResult<T>>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${API_BASE_URL}${path}`);
     xhr.responseType = opts.responseType ?? "json";
@@ -79,13 +100,19 @@ function postForm<T>(path: string, form: FormData, opts: RequestOptions = {}): P
 
     xhr.onload = async () => {
       if (xhr.status >= 200 && xhr.status < 300) {
-        resolve(xhr.response as T);
+        const disposition = xhr.getResponseHeader("content-disposition");
+        const filename = disposition ? parseFilenameFromHeader(disposition, "") : undefined;
+        resolve({ data: xhr.response as T, filename });
       } else {
         reject(new Error(await extractErrorMessage(xhr)));
       }
     };
     xhr.onerror = () =>
-      reject(new Error("Falha de conexão com o servidor Python. Verifique se o backend local está rodando em http://localhost:8000."));
+      reject(
+        new Error(
+          "Falha de conexão com o servidor Python. Verifique se o backend local está rodando em http://127.0.0.1:8000.",
+        ),
+      );
     xhr.onabort = () => reject(new AbortedError());
 
     if (opts.signal) {
@@ -100,22 +127,33 @@ function postForm<T>(path: string, form: FormData, opts: RequestOptions = {}): P
   });
 }
 
-export function inspectHdf5(file: File, opts: Omit<RequestOptions, "responseType"> = {}) {
+export async function inspectHdf5(file: File, opts: Omit<RequestOptions, "responseType"> = {}) {
   const form = new FormData();
   form.append("file", file);
-  return postForm<InspectResponse>("/inspect", form, { ...opts, responseType: "json" });
+  const res = await postForm<InspectResponse>("/inspect", form, { ...opts, responseType: "json" });
+  return res.data;
 }
 
-export function convertHdf5ToHal(
+export async function convertHdf5ToRaw(
   file: File,
   targetDataset: string,
   opts: Omit<RequestOptions, "responseType"> = {},
-) {
+): Promise<ConvertResult> {
   const form = new FormData();
   form.append("file", file);
   if (targetDataset) form.append("target_dataset", targetDataset);
-  return postForm<Blob>("/convert", form, { ...opts, responseType: "blob" });
+  const res = await postForm<Blob>("/convert", form, { ...opts, responseType: "blob" });
+  const defaultExt = targetDataset ? ".raw" : ".zip";
+  const baseName = file.name.replace(/\.(hdf5|h5)$/i, "");
+  const fallbackFilename = `${baseName}${defaultExt}`;
+  return {
+    blob: res.data,
+    filename: res.filename || fallbackFilename,
+  };
 }
+
+// Alias para manter compatibilidade
+export const convertHdf5ToHal = convertHdf5ToRaw;
 
 /** Dispara o download de um Blob no navegador. */
 export function downloadBlob(blob: Blob, filename: string) {

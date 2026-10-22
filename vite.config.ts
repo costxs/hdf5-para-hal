@@ -9,8 +9,10 @@ export default defineConfig({
     // Proxy para o FastAPI: o frontend chama /api/* sem problemas de CORS
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
+        timeout: 600000,
+        proxyTimeout: 600000,
       },
     },
   },
